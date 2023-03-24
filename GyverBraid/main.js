@@ -14,7 +14,7 @@ let cv = [
   { x: ui_offs + cv_d / 2 + 50, y: 50 + cv_d / 2 },
   { x: ui_offs + cv_d + 100 + cv_d / 2, y: 50 + cv_d / 2 }
 ];
-let ui, help;
+let ui;
 let img = null;
 let nodes = [];
 let overlaps = [];
@@ -29,12 +29,6 @@ let running = false;
 let stop_f = false;
 let costyl = 0;
 let hold_f = false;
-let radialGranularity = 32;
-let tmr;
-
-let ui_negative;
-let ui_center;
-let ui_radial;
 
 let start_x, start_y;
 let offs_x = 0, offs_y = 0;
@@ -49,28 +43,7 @@ function setup() {
   document.body.style.zoom = (Math.min((innerHeight - 25) / cHeight, (innerWidth - 25) / cWidth)).toFixed(1);
   createCanvas(cWidth, cHeight);
 
-  help = QuickSettings.create(ui_offs - 10, 0, "Помощь (кликни дважды)")
-    .addHTML("Выбор изображения", '<div style="height:30px"></div>')
-    .addHTML('Размер изображения', '<div style="height:20px"></div>')
-    .addHTML('Яркость', '<div style="height:20px"></div>')
-    .addHTML('Контраст', '<div style="height:20px"></div>')
-    .addHTML('Диаметр холста, см', '<div style="height:20px"></div>')
-    .addHTML('Толщина нитки, мм', '<div style="height:20px"></div>')
-    .addHTML('Количество гвоздей', '<div style="height:20px"></div>')
-    .addHTML('Максимум линий', '<div style="height:20px"></div>')
-    .addHTML('Ширина очистки', '<div style="height:20px"></div>')
-    .addHTML('Прозрачность очистки', '<div style="height:20px"></div>')
-    .addHTML('Запрет на угол возврата', '<div style="height:20px"></div>')
-    .addHTML('Максимум ниток на гвозде', '<div style="height:20px"></div>')
-    .addHTML('Оптимизация чёрных полос', '')
-    .addHTML('Общее улучшение', '')
-    .addHTML('Приоритет линий в центре', '')
-    .addHTML('Минимальное расстояние до след. гвоздя - 1/4 круга', '')
-    .setWidth(200)
-    .setDraggable(false)
-    .collapse()
-
-  ui = QuickSettings.create(0, 0, "GyverBraid v1.3")
+  ui = QuickSettings.create(0, 0, "GyverBraid v1.2")
     .addFileChooser("Pick Image", "", "", handleFile)
     .addRange('Size', cv_d - 300, cv_d + 500, cv_d, 1, update_h)
     .addRange('Brightness', -128, 128, 0, 1, update_h)
@@ -84,11 +57,11 @@ function setup() {
     .addRange('Max Lines', 0, 5000, 1500, 50, update_h)
     .addRange('Threshold', 0, 2000, 0, 0, update_h)
 
-    .addRange('Clear Width', 1.0, 5, 3, 0.5, update_h)
+    .addRange('Clear Width', 0.5, 5, 3, 0.5, update_h)
     .addRange('Clear Alpha', 0, 255, 20, 5, update_h)
+    .addBoolean('Subtract', 1, update_h)
     .addRange('Offset', 0, 100, 10, 5, update_h)
     .addRange('Overlaps', 0, 15, 0, 1, update_h)
-    .addBoolean('Radial Granularity', 0, update_h)
     .addBoolean('Negative', 0, update_h)
     .addBoolean('Center Balance', 0, update_h)
     .addBoolean('Quarter', 0, update_h)
@@ -109,6 +82,7 @@ function setup() {
   //ui.hideControl('Thickness');
   ui.hideControl('Edges');
   ui.hideControl('Threshold');
+  ui.hideControl('Subtract');
 
   density = pixelDensity();
 
@@ -143,40 +117,34 @@ function draw() {
 // =============== TRACER ===============
 function tracer() {
   setStatus("Running. Lines: " + count);
-
-  // it's faster
-  let ui_amount = ui_get("Node Amount");
-  let ui_offset = ui_get("Offset");
-  let ui_quarter = ui_get("Quarter");
-  let ui_overlaps = ui_get("Overlaps");
-  let ui_max = ui_get('Max Lines');
-  let ui_clear_a = ui_get('Clear Alpha');
-  let ui_clear_w = ui_get('Clear Width');
-  let ui_diameter = ui_get("Diameter");
-  let ui_thick = ui_get("Thickness");
-  let last_max = [1,1,1,1,1];
-
-  for (let i = 0; i < 20; i++) {
+  let amount = ui_get("Node Amount");
+  for (let i = 0; i < 10; i++) {
     let max = -10000000000;
     best = -1;
 
     loadPixels();
-    for (let i = 1; i < ui_amount; i++) {
-      if (node == i) continue;
+
+    for (let i = 1; i < amount; i++) {
+      let dst = abs(i - nodes[count - 1]);
+      if (dst > amount / 2) dst = amount - dst;
+      if (dst < 10) continue;
 
       if (count >= 2) {
         dst = abs(i - nodes[count - 2]);
-        if (dst > ui_amount / 2) dst = ui_amount - dst;
-        dst = dst / ui_amount * 360;
-        if (dst < ui_offset) continue;
+        if (dst > amount / 2) dst = amount - dst;
+        dst = dst / amount * 360;
+        if (dst < ui_get("Offset")) continue;
+
+        if (ui_get("Quarter")) {
+          const delta = abs(node - i)
+          const len = min(amount - delta, delta)
+          if (len <= amount / 8) {
+            continue;
+          }
+        }
       }
 
-      if (ui_quarter) {
-        let delta = abs(node - i);
-        if (min(ui_amount - delta, delta) <= ui_amount / 8) continue;
-      }
-
-      if (ui_overlaps > 0 && overlaps[i] + 1 > ui_overlaps) continue;
+      if (ui_get("Overlaps") > 0 && overlaps[i] + 1 > ui_get("Overlaps")) continue;
       let res = scanLine(node, i);
 
       if (res > max) {
@@ -184,42 +152,45 @@ function tracer() {
         best = i;
       }
     }
+
     overlaps[best]++;
 
-    last_max.push(max);
-    last_max.shift();
-    let stop = true;
-    for (let m in last_max) if (last_max[m] != 0) stop = false;
-
-    if (count > ui_max || best < 0 || stop || /*max < ui_get('Threshold') || */stop_f) {
+    if (count > ui_get('Max Lines') || best < 0 || /*max < ui_get('Threshold') || */stop_f) {
       running = false;
       count--;
-      setStatus("Done! " + count + " lines, " + Math.round(length / 100) + " m, max overlap " + Math.max(...overlaps) + ' in ' + ((Date.now() - tmr) / 1000).toFixed(1) + ' seconds');
-      ui_set("Nodes", nodes);
-      nodes.push(ui_amount & 0xff);
+      setStatus("Done! " + count + " lines, " + Math.round(length / 100) + " m");
 
+      ui_set("Nodes", nodes);
+      nodes.push(amount & 0xff);
+
+      let u8 = new Uint8Array(nodes);
+      var decoder = new TextDecoder('utf8');
+      //ui_set("Nodes B64", btoa(nodes.map(function (v) { return String.fromCharCode(v) }).join('')));
       ui_set("Nodes B64", btoa(String.fromCharCode.apply(null, new Uint8Array(nodes))));
       nodes.pop();
       return;
     }
 
     nodes.push(best);
+
     let xy = [get_xy(0, node), get_xy(0, best)];
-    /*
-    updatePixels();
-    stroke(255, 255, 255, ui_clear_a);
-    strokeWeight(ui_clear_w);
-    line(xy[0].x, xy[0].y, xy[1].x, xy[1].y);
-    */
-    clearLine(xy, ui_clear_w, ui_clear_a);
-    updatePixels();
+
+    if (!ui_get('Subtract')) {
+      updatePixels();
+      stroke(255, 255, 255, ui_get('Clear Alpha'));
+      strokeWeight(ui_get('Clear Width'));
+      line(xy[0].x, xy[0].y, xy[1].x, xy[1].y);
+    } else {
+      clearLine(xy, ui_get('Clear Width'), ui_get('Clear Alpha'));
+      updatePixels();
+    }
 
     stroke(0, 0, 0, 150);
-    strokeWeight(ui_thick / ((ui_diameter * 10 / cv_d)));
+    strokeWeight(ui_get("Thickness") / ((ui_get("Diameter") * 10 / cv_d)));
 
     xy = [get_xy(1, node), get_xy(1, best)];
     line(xy[0].x, xy[0].y, xy[1].x, xy[1].y);
-    length += dist(xy[0].x, xy[0].y, xy[1].x, xy[1].y) * ui_diameter / (cv_d);
+    length += dist(xy[0].x, xy[0].y, xy[1].x, xy[1].y) * ui_get("Diameter") / (cv_d);
     node = best;
     count++;
   }
@@ -240,30 +211,25 @@ function scanLine(start, end) {
   let err = dx - dy;
   let e2 = 0;
   let len = 0;
-  let radialMask = getRadialMask(x0, y0, x1, y1);
 
   while (1) {
     let i = getPixelIndex(x0, y0);
     let val;
 
-    if (ui_negative) {
+    if (ui_get('Negative')) {
       val = (255 - pixels[i]) - (255 - pixels[i + 3]);
     } else {
       val = 255 - pixels[i];
     }
 
-    if (ui_center) {
+    if (ui_get('Center Balance')) {
       let cx = abs(cv[0].x - x0);
       let cy = abs(cv[0].y - y0);
       let cl = Math.sqrt(cx * cx + cy * cy);
       val *= Math.log(cv_d / 2 / cl);
     }
 
-    if (ui_radial) {
-      if (radialMask == 0 || ((radialFill[i] || 0) & radialMask) == 0) sum += val;
-    } else {
-      sum += val;
-    }
+    sum += val;
 
     len++;
 
@@ -306,13 +272,11 @@ function clearLine(xy, w, a) {
     let dy = abs(y1 - y0);
     let err = dx - dy;
     let e2 = 0;
-    let radialMask = getRadialMask(x0, y0, x1, y1);
 
     while (1) {
       let i = getPixelIndex(x0, y0);
-      radialFill[i] = (radialFill[i] || 0) | radialMask;
 
-      if (ui_negative) {
+      if (ui_get('Negative')) {
         if (pixels[i] + a < 255) {
           pixels[i] += a;
           pixels[i + 1] += a;
@@ -432,10 +396,6 @@ function mouseWheel(event) {
 function update_h() {
   update_f = true;
   running = false;
-  //radialGranularity = ui_get("Radial Granularity");
-  ui_negative = ui_get('Negative');
-  ui_center = ui_get('Center Balance');
-  ui_radial = ui_get('Radial Granularity');
 }
 /*function resize(val) {
   cv_d = val;
@@ -454,8 +414,6 @@ function start() {
   update_f = true;
   running = true;
   stop_f = false;
-  radialFill = [];
-  tmr = Date.now();
 }
 function stop() {
   if (!running) update_f = true;
@@ -486,7 +444,7 @@ function template() {
   const offs = 100;
   const ratio = 3.778;
   let size = Math.round(ui_get('Diameter') * 10 * ratio) + offs * 2;
-  let am = ui_get('Node Amount');
+
 
   let pg = createGraphics(size, size);
   pg.background(255);
@@ -495,12 +453,11 @@ function template() {
   let y = 0;
   pg.text('Diameter = ' + ui_get('Diameter') + ' cm', 20, y += 25);
   pg.text('Print size = ' + D + 'x' + D + ' cm', 20, y += 25);
-  pg.text('Nail distance = ' + (3.14 * D * 10 / am).toFixed(1) + ' mm', 20, y += 25);
 
   pg.fill(0);
   pg.textAlign(CENTER, CENTER);
   //pg.textFont('Trebuchet MS');
-  
+  let am = ui_get('Node Amount');
 
   pg.stroke(0);
   pg.line(size / 2 - 80, size / 2, size / 2 + 80, size / 2);
@@ -572,12 +529,6 @@ function svg() {
 }
 
 // =============== UTILITY ===============
-function getRadialMask(x0, y0, x1, y1) {
-  if (radialGranularity <= 0) return 0;
-  let angle = x1 == x0 ? (y0 < y1 ? 1 : -1) : Math.atan((y1 - y0) / (x1 - x0));
-  let radialAngle = Math.round((angle + Math.PI / 2) * radialGranularity / Math.PI);
-  return 1 << radialAngle;
-}
 function getPixelIndex(x, y) {
   return Math.round((x + y * width * density) * 4 * density);
 }
